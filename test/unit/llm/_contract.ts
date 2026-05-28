@@ -22,6 +22,10 @@ const contractResponse = {
     prompt_tokens: 11,
     completion_tokens: 7,
   },
+  usageMetadata: {
+    promptTokenCount: 11,
+    candidatesTokenCount: 7,
+  },
 };
 
 const server = setupServer(
@@ -36,6 +40,20 @@ const server = setupServer(
       return HttpResponse.json(
         { error: { message: "contract rate limit failure" } },
         { status: 429 },
+      );
+    }
+
+    if (body.includes("__contract_bad_request__")) {
+      return HttpResponse.json(
+        { error: { message: "contract malformed request failure" } },
+        { status: 400 },
+      );
+    }
+
+    if (body.includes("__contract_upstream__")) {
+      return HttpResponse.json(
+        { error: { message: "contract upstream failure" } },
+        { status: 503 },
       );
     }
 
@@ -93,12 +111,46 @@ export function runLLMProviderContractTests(createProvider: () => LLMProvider): 
       await expectLLMError(() => provider.complete(contractParams("__contract_auth__")), "AUTH");
     });
 
+    it("returns normalized completion text, usage, model, and raw response", async () => {
+      const provider = createProvider();
+
+      await expect(
+        provider.complete(contractParams("__contract_success__")),
+      ).resolves.toMatchObject({
+        text: "contract response",
+        usage: {
+          inputTokens: 11,
+          outputTokens: 7,
+        },
+        model: "contract-model",
+        raw: expect.any(Object),
+      });
+    });
+
     it("maps rate-limit failures to LLMError RATE_LIMIT", async () => {
       const provider = createProvider();
 
       await expectLLMError(
         () => provider.complete(contractParams("__contract_rate_limit__")),
         "RATE_LIMIT",
+      );
+    });
+
+    it("maps malformed requests to LLMError BAD_REQUEST", async () => {
+      const provider = createProvider();
+
+      await expectLLMError(
+        () => provider.complete(contractParams("__contract_bad_request__")),
+        "BAD_REQUEST",
+      );
+    });
+
+    it("maps provider 5xx failures to LLMError UPSTREAM", async () => {
+      const provider = createProvider();
+
+      await expectLLMError(
+        () => provider.complete(contractParams("__contract_upstream__")),
+        "UPSTREAM",
       );
     });
 
